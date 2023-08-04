@@ -162,6 +162,7 @@
         android:layout_height="wrap_content"
         android:descendantFocusability="afterDescendants"
         android:nextFocusLeft="@id/nav_rail_view"
+        android:nextFocusUp="@id/home_bookmarked_child_recyclerview"
         app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
         tools:listitem="@layout/homepage_parent_tv" />
 
@@ -170,6 +171,17 @@
         style="@style/ExtendedFloatingActionButton"
         android:visibility="gone"
         app:icon="@drawable/ic_baseline_filter_list_24"
+        tools:ignore="ContentDescription"
+        tools:visibility="visible" />
+
+    <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
+        android:id="@+id/home_random"
+        style="@style/ExtendedFloatingActionButton"
+        android:layout_gravity="bottom|start"
+        android:text="@string/home_random"
+        android:textColor="?attr/textColor"
+        android:visibility="gone"
+        app:icon="@drawable/ic_baseline_play_arrow_24"
         tools:ignore="ContentDescription"
         tools:visibility="visible" />
 </FrameLayout>

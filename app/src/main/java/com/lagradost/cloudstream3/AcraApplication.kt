@@ -51,8 +51,8 @@ class CustomReportSender : ReportSender {
         thread { // to not run it on main thread
             runBlocking {
                 suspendSafeApiCall {
-                    val post = app.post(url, data = data)
-                    println("Report response: $post")
+                    app.post(url, data = data)
+                    //println("Report response: $post")
                 }
             }
         }
@@ -147,6 +147,14 @@ class AcraApplication : Application() {
             private set(value) {
                 _context = WeakReference(value)
             }
+
+        fun <T : Any> getKeyClass(path: String, valueType: Class<T>): T? {
+            return context?.getKey(path, valueType)
+        }
+
+        fun <T : Any> setKeyClass(path: String, value: T) {
+            context?.setKey(path, value)
+        }
 
         fun removeKeys(folder: String): Int? {
             return context?.removeKeys(folder)

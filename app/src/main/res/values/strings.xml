@@ -7,6 +7,7 @@
     <string name="auto_update_key" translatable="false">auto_update</string>
     <string name="auto_update_plugins_key" translatable="false">auto_update_plugins</string>
     <string name="auto_download_plugins_key" translatable="false">auto_download_plugins_key</string>
+    <string name="auto_download_plugins_pref" translatable="false">auto_download_plugins_pref</string>
     <string name="skip_update_key" translatable="false">skip_update_key</string>
     <string name="prerelease_update_key" translatable="false">prerelease_update</string>
     <string name="manual_check_update_key" translatable="false">manual_check_update</string>
@@ -249,6 +250,7 @@
     <string name="pref_filter_search_quality">Hide selected video quality in search results</string>
     <string name="automatic_plugin_updates">Automatic plugin updates</string>
     <string name="automatic_plugin_download">Automatically download plugins</string>
+    <string name="automatic_plugin_download_mode_title">Select mode to filter plugins download</string>
     <string name="automatic_plugin_download_summary">Automatically install all not yet installed plugins from added repositories.</string>
     <string name="updates_settings">Show app updates</string>
     <string name="updates_settings_des">Automatically search for new updates after starting the app.</string>
@@ -305,6 +307,7 @@
     <string name="queued">queued</string>
     <string name="no_subtitles">No Subtitles</string>
     <string name="default_subtitles">Default</string>
+    <string name="default_account">@string/default_subtitles</string>
     <string name="free_storage">Free</string>
     <string name="used_storage">Used</string>
     <string name="app_storage">App</string>
@@ -482,6 +485,7 @@
     <string name="authenticated_user" formatted="true">%s authenticated</string>
     <string name="authenticated_user_fail" formatted="true">Could not log in at %s</string>
     <!-- ============ -->
+    <string name="disable">Disable</string>
     <string name="none">None</string>
     <string name="normal">Normal</string>
     <string name="all">All</string>
@@ -677,4 +681,8 @@
     </string>
     <string name="qualities">Qualities</string>
     <string name="profile_background_des">Profile background</string>
+    <string name="unable_to_inflate">UI was unable to be created correctly, this is a MAJOR BUG and should be reported immediately %s</string>
+
+
+    <string name="tv_no_focus_tag" translatable="false">tv_no_focus_tag</string>
 </resources>

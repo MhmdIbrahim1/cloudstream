@@ -370,6 +370,7 @@ val extractorApis: MutableList<ExtractorApi> = arrayListOf(
     Gofile(),
     Vicloud(),
     Uservideo(),
+    Userscloud(),
 
     Movhide(),
     StreamhideCom(),
@@ -399,6 +400,7 @@ val extractorApis: MutableList<ExtractorApi> = arrayListOf(
     Moviehab(),
     MoviehabNet(),
     Jeniusplay(),
+    StreamoUpload(),
 
     Gdriveplayerapi(),
     Gdriveplayerapp(),

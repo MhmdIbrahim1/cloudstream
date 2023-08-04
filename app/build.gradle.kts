@@ -1,4 +1,3 @@
-import com.android.build.gradle.api.BaseVariantOutput
 import org.jetbrains.dokka.gradle.DokkaTask
 import java.io.ByteArrayOutputStream
 import java.net.URL
@@ -7,7 +6,6 @@ plugins {
     id("com.android.application")
     id("kotlin-android")
     id("kotlin-kapt")
-    id("kotlin-android-extensions")
     id("org.jetbrains.dokka")
 }
 
@@ -19,7 +17,7 @@ fun String.execute() = ByteArrayOutputStream().use { baot ->
             workingDir = projectDir
             commandLine = this@execute.split(Regex("\\s"))
             standardOutput = baot
-    }.exitValue == 0)
+        }.exitValue == 0)
         String(baot.toByteArray()).trim()
     else null
 }
@@ -28,6 +26,11 @@ android {
     testOptions {
         unitTests.isReturnDefaultValues = true
     }
+
+    viewBinding {
+        enable = true
+    }
+
     signingConfigs {
         create("prerelease") {
             if (prereleaseStoreFile != null) {
@@ -48,7 +51,7 @@ android {
         targetSdk = 33
 
         versionCode = 59
-        versionName = "4.0.1"
+        versionName = "4.1.2"
 
         resValue("string", "app_version", "${defaultConfig.versionName}${versionNameSuffix ?: ""}")
 
@@ -74,12 +77,18 @@ android {
             isDebuggable = false
             isMinifyEnabled = false
             isShrinkResources = false
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
         debug {
             isDebuggable = true
             applicationIdSuffix = ".debug"
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
     flavorDimensions.add("state")
@@ -98,14 +107,19 @@ android {
             versionCode = (System.currentTimeMillis() / 60000).toInt()
         }
     }
+    //toolchain {
+   //     languageVersion.set(JavaLanguageVersion.of(17))
+   // }
+   // jvmToolchain(17)
+
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
 
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions {
-        jvmTarget = "1.8"
+        jvmTarget = "17"
         freeCompilerArgs = listOf("-Xjvm-default=compatibility")
     }
     lint {
@@ -121,22 +135,23 @@ repositories {
 
 dependencies {
     implementation("com.google.android.mediahome:video:1.0.0")
-    implementation("androidx.test.ext:junit-ktx:1.1.3")
+    implementation("androidx.test.ext:junit-ktx:1.1.5")
     testImplementation("org.json:json:20180813")
 
-    implementation("androidx.core:core-ktx:1.8.0")
-    implementation("androidx.appcompat:appcompat:1.4.2") // need target 32 for 1.5.0
+    implementation("androidx.core:core-ktx:1.10.1")
+    implementation("androidx.appcompat:appcompat:1.6.1") // need target 32 for 1.5.0
 
     // dont change this to 1.6.0 it looks ugly af
     implementation("com.google.android.material:material:1.5.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
-    implementation("androidx.navigation:navigation-fragment-ktx:2.5.1")
-    implementation("androidx.navigation:navigation-ui-ktx:2.5.1")
-    implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.5.1")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.5.1")
+    implementation("androidx.navigation:navigation-fragment-ktx:2.6.0")
+    implementation("androidx.navigation:navigation-ui-ktx:2.6.0")
+    implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.6.1")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.6.1")
     testImplementation("junit:junit:4.13.2")
-    androidTestImplementation("androidx.test.ext:junit:1.1.3")
-    androidTestImplementation("androidx.test.espresso:espresso-core:3.4.0")
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
+    androidTestImplementation("androidx.test:core")
 
     //implementation("io.karn:khttp-android:0.1.2") //okhttp instead
 //    implementation("org.jsoup:jsoup:1.13.1")
@@ -154,13 +169,17 @@ dependencies {
 
     // implementation("androidx.leanback:leanback-paging:1.1.0-alpha09")
 
-    // Exoplayer
-    implementation("com.google.android.exoplayer:exoplayer:2.18.2")
-    implementation("com.google.android.exoplayer:extension-cast:2.18.2")
-    implementation("com.google.android.exoplayer:extension-mediasession:2.18.2")
-    implementation("com.google.android.exoplayer:extension-okhttp:2.18.2")
-    // Use the Jellyfin ffmpeg extension for easy ffmpeg audio decoding in exoplayer. Thank you Jellyfin <3
-//    implementation("org.jellyfin.exoplayer:exoplayer-ffmpeg-extension:2.18.2+1")
+    // Media 3
+    implementation("androidx.media3:media3-common:1.1.0")
+    implementation("androidx.media3:media3-exoplayer:1.1.0")
+    implementation("androidx.media3:media3-datasource-okhttp:1.1.0")
+    implementation("androidx.media3:media3-ui:1.1.0")
+    implementation("androidx.media3:media3-session:1.1.0")
+    implementation("androidx.media3:media3-cast:1.1.0")
+    implementation("androidx.media3:media3-exoplayer-hls:1.1.0")
+    implementation("androidx.media3:media3-exoplayer-dash:1.1.0")
+    // Custom ffmpeg extension for audio codecs
+    implementation("com.github.recloudstream:media-ffmpeg:1.1.0")
 
     //implementation("com.google.android.exoplayer:extension-leanback:2.14.0")
 
@@ -186,8 +205,8 @@ dependencies {
     //implementation("com.github.TorrentStream:TorrentStream-Android:2.7.0")
 
     // Downloading
-    implementation("androidx.work:work-runtime:2.8.0")
-    implementation("androidx.work:work-runtime-ktx:2.8.0")
+    implementation("androidx.work:work-runtime:2.8.1")
+    implementation("androidx.work:work-runtime-ktx:2.8.1")
 
     // Networking
 //    implementation("com.squareup.okhttp3:okhttp:4.9.2")
@@ -203,7 +222,7 @@ dependencies {
 
     implementation("com.github.discord:OverlappingPanels:0.1.3")
     // debugImplementation because LeakCanary should only run in debug builds.
-    // debugImplementation 'com.squareup.leakcanary:leakcanary-android:2.7'
+    //debugImplementation("com.squareup.leakcanary:leakcanary-android:2.12")
 
     // for shimmer when loading
     implementation("com.facebook.shimmer:shimmer:0.5.0")
@@ -217,13 +236,13 @@ dependencies {
     //implementation("com.github.HaarigerHarald:android-youtubeExtractor:master-SNAPSHOT")
 
     // newpipe yt taken from https://github.com/TeamNewPipe/NewPipe/blob/dev/app/build.gradle#L204
-    implementation("com.github.TeamNewPipe:NewPipeExtractor:master-SNAPSHOT")
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:8495ad619e")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:1.1.6")
 
     // Library/extensions searching with Levenshtein distance
     implementation("me.xdrop:fuzzywuzzy:1.4.0")
 
-    // color pallette for images -> colors
+    // color palette for images -> colors
     implementation("androidx.palette:palette-ktx:1.0.0")
 }
 

@@ -163,7 +163,8 @@ object PluginManager {
     private val classLoaders: MutableMap<PathClassLoader, Plugin> =
         HashMap<PathClassLoader, Plugin>()
 
-    private var loadedLocalPlugins = false
+    var loadedLocalPlugins = false
+        private set
     private val gson = Gson()
 
     private suspend fun maybeLoadPlugin(context: Context, file: File) {
@@ -289,7 +290,7 @@ object PluginManager {
      * 2. Fetch all not downloaded plugins
      * 3. Download them and reload plugins
      **/
-    fun downloadNotExistingPluginsAndLoad(activity: Activity) {
+    fun downloadNotExistingPluginsAndLoad(activity: Activity, mode: AutoDownloadMode) {
         val newDownloadPlugins = mutableListOf<String>()
         val urls = (getKey<Array<RepositoryData>>(REPOSITORIES_KEY)
             ?: emptyArray()) + PREBUILT_REPOSITORIES
@@ -303,6 +304,8 @@ object PluginManager {
         // Iterate online repos and returns not downloaded plugins
         val notDownloadedPlugins = onlinePlugins.mapNotNull { onlineData ->
             val sitePlugin = onlineData.second
+            val tvtypes = sitePlugin.tvTypes ?: listOf()
+
             //Don't include empty urls
             if (sitePlugin.url.isBlank()) {
                 return@mapNotNull null
@@ -317,22 +320,29 @@ object PluginManager {
                 return@mapNotNull null
             }
 
-            //Omit lang not selected on language setting
-            val lang = sitePlugin.language ?: return@mapNotNull null
-            //If set to 'universal', don't skip any language
-            if (!providerLang.contains(AllLanguagesName) && !providerLang.contains(lang)) {
-                return@mapNotNull null
-            }
-            //Log.i(TAG, "sitePlugin lang => $lang")
-
-            //Omit NSFW, if disabled
-            sitePlugin.tvTypes?.let { tvtypes ->
-                if (!settingsForProvider.enableAdult) {
-                    if (tvtypes.contains(TvType.NSFW.name)) {
-                        return@mapNotNull null
-                    }
+            //Omit non-NSFW if mode is set to NSFW only
+            if (mode == AutoDownloadMode.NsfwOnly) {
+                if (tvtypes.contains(TvType.NSFW.name) == false) {
+                    return@mapNotNull null
                 }
             }
+            //Omit NSFW, if disabled
+            if (!settingsForProvider.enableAdult) {
+                if (tvtypes.contains(TvType.NSFW.name)) {
+                    return@mapNotNull null
+                }
+            }
+
+            //Omit lang not selected on language setting
+            if (mode == AutoDownloadMode.FilterByLang) {
+                val lang = sitePlugin.language ?: return@mapNotNull null
+                //If set to 'universal', don't skip any language
+                if (!providerLang.contains(AllLanguagesName) && !providerLang.contains(lang)) {
+                    return@mapNotNull null
+                }
+                //Log.i(TAG, "sitePlugin lang => $lang")
+            }
+
             val savedData = PluginData(
                 url = sitePlugin.url,
                 internalName = sitePlugin.internalName,
@@ -531,10 +541,14 @@ object PluginManager {
         }
 
         // remove all registered apis
-        APIHolder.apis.filter { api -> api.sourcePlugin == plugin.__filename }.forEach {
-            removePluginMapping(it)
+        synchronized(APIHolder.apis) {
+            APIHolder.apis.filter { api -> api.sourcePlugin == plugin.__filename }.forEach {
+                removePluginMapping(it)
+            }
         }
-        APIHolder.allProviders.removeIf { provider: MainAPI -> provider.sourcePlugin == plugin.__filename }
+        synchronized(APIHolder.allProviders) {
+            APIHolder.allProviders.removeIf { provider: MainAPI -> provider.sourcePlugin == plugin.__filename }
+        }
         extractorApis.removeIf { provider: ExtractorApi -> provider.sourcePlugin == plugin.__filename }
 
         classLoaders.values.removeIf { v -> v == plugin }
