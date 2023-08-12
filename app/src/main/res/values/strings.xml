@@ -6,8 +6,7 @@
     <string name="search_types_list_key" translatable="false">search_type_list</string>
     <string name="auto_update_key" translatable="false">auto_update</string>
     <string name="auto_update_plugins_key" translatable="false">auto_update_plugins</string>
-    <string name="auto_download_plugins_key" translatable="false">auto_download_plugins_key</string>
-    <string name="auto_download_plugins_pref" translatable="false">auto_download_plugins_pref</string>
+    <string name="auto_download_plugins_key" translatable="false">auto_download_plugins_key2</string>
     <string name="skip_update_key" translatable="false">skip_update_key</string>
     <string name="prerelease_update_key" translatable="false">prerelease_update</string>
     <string name="manual_check_update_key" translatable="false">manual_check_update</string>
@@ -450,6 +449,7 @@
     <string name="bottom_title_settings_des">Put the title under the poster</string>
     <!-- account stuff -->
     <string name="anilist_key" translatable="false">anilist_key</string>
+    <string name="simkl_key" translatable="false">simkl_key</string>
     <string name="mal_key" translatable="false">mal_key</string>
     <string name="opensubtitles_key" translatable="false">opensubtitles_key</string>
     <string name="nginx_key" translatable="false">nginx_key</string>
@@ -687,4 +687,5 @@
 
 
     <string name="tv_no_focus_tag" translatable="false">tv_no_focus_tag</string>
+    <string name="already_voted">You have already voted</string>
 </resources>
