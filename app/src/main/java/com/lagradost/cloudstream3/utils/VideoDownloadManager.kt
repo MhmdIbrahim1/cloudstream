@@ -15,8 +15,6 @@ import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.net.toUri
-import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.MutableLiveData
 import androidx.preference.PreferenceManager
 import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
@@ -28,34 +26,31 @@ import com.hippo.unifile.UniFile
 import com.lagradost.cloudstream3.APIHolder.getApiFromNameNull
 import com.lagradost.cloudstream3.AcraApplication.Companion.removeKey
 import com.lagradost.cloudstream3.AcraApplication.Companion.setKey
+import com.lagradost.cloudstream3.BuildConfig
 import com.lagradost.cloudstream3.MainActivity
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.TvType
+import com.lagradost.cloudstream3.amap
+import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.mvvm.logError
-import com.lagradost.cloudstream3.mvvm.normalSafeApiCall
+import com.lagradost.cloudstream3.mvvm.suspendSafeApiCall
 import com.lagradost.cloudstream3.services.VideoDownloadService
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
 import com.lagradost.cloudstream3.utils.Coroutines.main
 import com.lagradost.cloudstream3.utils.DataStore.getKey
 import com.lagradost.cloudstream3.utils.DataStore.removeKey
 import com.lagradost.cloudstream3.utils.UIHelper.colorFromAttribute
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import okhttp3.internal.closeQuietly
-import java.io.BufferedInputStream
+import java.io.Closeable
 import java.io.File
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
-import java.lang.Thread.sleep
-import java.net.URI
 import java.net.URL
-import java.net.URLConnection
 import java.util.*
-import kotlin.math.roundToInt
 
 const val DOWNLOAD_CHANNEL_ID = "cloudstream3.general"
 const val DOWNLOAD_CHANNEL_NAME = "Downloads"
@@ -66,34 +61,31 @@ object VideoDownloadManager {
     private var currentDownloads = mutableListOf<Int>()
 
     private const val USER_AGENT =
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36"
 
-    @DrawableRes
-    const val imgDone = R.drawable.rddone
+    @get:DrawableRes
+    val imgDone get() = R.drawable.rddone
 
-    @DrawableRes
-    const val imgDownloading = R.drawable.rdload
+    @get:DrawableRes
+    val imgDownloading get() = R.drawable.rdload
 
-    @DrawableRes
-    const val imgPaused = R.drawable.rdpause
+    @get:DrawableRes
+    val imgPaused get() = R.drawable.rdpause
 
-    @DrawableRes
-    const val imgStopped = R.drawable.rderror
+    @get:DrawableRes
+    val imgStopped get() = R.drawable.rderror
 
-    @DrawableRes
-    const val imgError = R.drawable.rderror
+    @get:DrawableRes
+    val imgError get() = R.drawable.rderror
 
-    @DrawableRes
-    const val pressToPauseIcon = R.drawable.ic_baseline_pause_24
+    @get:DrawableRes
+    val pressToPauseIcon get() = R.drawable.ic_baseline_pause_24
 
-    @DrawableRes
-    const val pressToResumeIcon = R.drawable.ic_baseline_play_arrow_24
+    @get:DrawableRes
+    val pressToResumeIcon get() = R.drawable.ic_baseline_play_arrow_24
 
-    @DrawableRes
-    const val pressToStopIcon = R.drawable.exo_icon_stop
-
-    private var updateCount : Int = 0
-    private val downloadDataUpdateCount = MutableLiveData<Int>()
+    @get:DrawableRes
+    val pressToStopIcon get() = R.drawable.baseline_stop_24
 
     enum class DownloadType {
         IsPaused,
@@ -257,9 +249,8 @@ object VideoDownloadManager {
         total: Long,
         notificationCallback: (Int, Notification) -> Unit,
         hlsProgress: Long? = null,
-        hlsTotal: Long? = null,
-
-        ): Notification? {
+        hlsTotal: Long? = null
+    ): Notification? {
         try {
             if (total <= 0) return null// crash, invalid data
 
@@ -342,14 +333,28 @@ object VideoDownloadManager {
                 }
 
                 val bigText =
-                    if (state == DownloadType.IsDownloading || state == DownloadType.IsPaused) {
-                        (if (linkName == null) "" else "$linkName\n") + "$rowTwo\n$progressPercentage % ($progressMbString/$totalMbString)$suffix"
-                    } else if (state == DownloadType.IsFailed) {
-                        downloadFormat.format(context.getString(R.string.download_failed), rowTwo)
-                    } else if (state == DownloadType.IsDone) {
-                        downloadFormat.format(context.getString(R.string.download_done), rowTwo)
-                    } else {
-                        downloadFormat.format(context.getString(R.string.download_canceled), rowTwo)
+                    when (state) {
+                        DownloadType.IsDownloading, DownloadType.IsPaused -> {
+                            (if (linkName == null) "" else "$linkName\n") + "$rowTwo\n$progressPercentage % ($progressMbString/$totalMbString)$suffix"
+                        }
+
+                        DownloadType.IsFailed -> {
+                            downloadFormat.format(
+                                context.getString(R.string.download_failed),
+                                rowTwo
+                            )
+                        }
+
+                        DownloadType.IsDone -> {
+                            downloadFormat.format(context.getString(R.string.download_done), rowTwo)
+                        }
+
+                        else -> {
+                            downloadFormat.format(
+                                context.getString(R.string.download_canceled),
+                                rowTwo
+                            )
+                        }
                     }
 
                 val bodyStyle = NotificationCompat.BigTextStyle()
@@ -357,14 +362,28 @@ object VideoDownloadManager {
                 builder.setStyle(bodyStyle)
             } else {
                 val txt =
-                    if (state == DownloadType.IsDownloading || state == DownloadType.IsPaused) {
-                        rowTwo
-                    } else if (state == DownloadType.IsFailed) {
-                        downloadFormat.format(context.getString(R.string.download_failed), rowTwo)
-                    } else if (state == DownloadType.IsDone) {
-                        downloadFormat.format(context.getString(R.string.download_done), rowTwo)
-                    } else {
-                        downloadFormat.format(context.getString(R.string.download_canceled), rowTwo)
+                    when (state) {
+                        DownloadType.IsDownloading, DownloadType.IsPaused -> {
+                            rowTwo
+                        }
+
+                        DownloadType.IsFailed -> {
+                            downloadFormat.format(
+                                context.getString(R.string.download_failed),
+                                rowTwo
+                            )
+                        }
+
+                        DownloadType.IsDone -> {
+                            downloadFormat.format(context.getString(R.string.download_done), rowTwo)
+                        }
+
+                        else -> {
+                            downloadFormat.format(
+                                context.getString(R.string.download_canceled),
+                                rowTwo
+                            )
+                        }
                     }
 
                 builder.setContentText(txt)
@@ -687,7 +706,185 @@ object VideoDownloadManager {
         return StreamData(SUCCESS_STREAM, resume, fileLength, fileStream)
     }
 
-    fun downloadThing(
+    /** This class handles the notifications, as well as the relevant key */
+    data class DownloadMetaData(
+        private val id: Int?,
+        var bytesDownloaded: Long = 0,
+        var totalBytes: Long? = null,
+
+        // notification metadata
+        private var lastUpdatedMs: Long = 0,
+        private val createNotificationCallback: (CreateNotificationMetadata) -> Unit,
+
+        private var internalType: DownloadType = DownloadType.IsPending,
+
+        // how many segments that we have downloaded
+        var hlsProgress: Int = 0,
+        // how many segments that exist
+        var hlsTotal: Int? = null,
+        // this is how many segments that has been written to the file
+        // will always be <= hlsProgress as we may keep some in a buffer
+        var hlsWrittenProgress: Int = 0,
+
+        // this is used for copy with metadata on how much we have downloaded for setKey
+        private var downloadFileInfoTemplate: DownloadedFileInfo? = null
+    ) : Closeable {
+        val approxTotalBytes: Long
+            get() = totalBytes ?: hlsTotal?.let { total ->
+                (bytesDownloaded * (total / hlsProgress.toFloat())).toLong()
+            } ?: 0L
+
+        private val isHLS get() = hlsTotal != null
+
+        private val downloadEventListener = { event: Pair<Int, DownloadActionType> ->
+            if (event.first == id) {
+                when (event.second) {
+                    DownloadActionType.Pause -> {
+                        type = DownloadType.IsPaused
+                    }
+
+                    DownloadActionType.Stop -> {
+                        type = DownloadType.IsStopped
+                        removeKey(KEY_RESUME_PACKAGES, event.first.toString())
+                        saveQueue()
+                    }
+
+                    DownloadActionType.Resume -> {
+                        type = DownloadType.IsDownloading
+                    }
+                }
+            }
+        }
+
+        private fun updateFileInfo() {
+            if (id == null) return
+            downloadFileInfoTemplate?.let { template ->
+                setKey(
+                    KEY_DOWNLOAD_INFO,
+                    id.toString(),
+                    template.copy(
+                        totalBytes = approxTotalBytes,
+                        extraInfo = if (isHLS) hlsWrittenProgress.toString() else null
+                    )
+                )
+            }
+        }
+
+        fun setDownloadFileInfoTemplate(template: DownloadedFileInfo) {
+            downloadFileInfoTemplate = template
+            updateFileInfo()
+        }
+
+        init {
+            if (id != null) {
+                downloadEvent += downloadEventListener
+            }
+        }
+
+        override fun close() {
+            // as we may need to resume hls downloads, we save the current written index
+            if (isHLS) {
+                updateFileInfo()
+            }
+            if (id != null) {
+                downloadEvent -= downloadEventListener
+                downloadStatus -= id
+            }
+        }
+
+        var type
+            get() = internalType
+            set(value) {
+                internalType = value
+                notify()
+            }
+
+        fun onDelete() {
+            bytesDownloaded = 0
+            hlsWrittenProgress = 0
+            hlsProgress = 0
+
+            //internalType = DownloadType.IsStopped
+            notify()
+        }
+
+        companion object {
+            const val UPDATE_RATE_MS: Long = 1000L
+        }
+
+        @JvmName("DownloadMetaDataNotify")
+        private fun notify() {
+            lastUpdatedMs = System.currentTimeMillis()
+            try {
+                val bytes = approxTotalBytes
+
+                // notification creation
+                if (isHLS) {
+                    createNotificationCallback(
+                        CreateNotificationMetadata(
+                            internalType,
+                            bytesDownloaded,
+                            bytes,
+                            hlsTotal = hlsTotal?.toLong(),
+                            hlsProgress = hlsProgress.toLong()
+                        )
+                    )
+                } else {
+                    createNotificationCallback(
+                        CreateNotificationMetadata(
+                            internalType,
+                            bytesDownloaded,
+                            bytes,
+                        )
+                    )
+                }
+
+                // as hls has an approx file size we want to update this metadata
+                if (isHLS) {
+                    updateFileInfo()
+                }
+
+                // push all events, this *should* not crash, TODO MUTEX?
+                if (id != null) {
+                    downloadStatus[id] = type
+                    downloadProgressEvent(Triple(id, bytesDownloaded, bytes))
+                    downloadStatusEvent(id to type)
+                }
+            } catch (t: Throwable) {
+                logError(t)
+                if (BuildConfig.DEBUG) {
+                    throw t
+                }
+            }
+        }
+
+        private fun checkNotification() {
+            if (lastUpdatedMs + UPDATE_RATE_MS > System.currentTimeMillis()) return
+            notify()
+        }
+
+
+        /** adds the length and pushes a notification if necessary */
+        fun addBytes(length: Long) {
+            bytesDownloaded += length
+            // we don't want to update the notification after it is paused,
+            // download progress may not stop directly when we "pause" it
+            if (type == DownloadType.IsDownloading) checkNotification()
+        }
+
+        /** adds the length + hsl progress and pushes a notification if necessary */
+        fun addSegment(length: Long) {
+            hlsProgress += 1
+            addBytes(length)
+        }
+
+        fun setWrittenSegment(segmentIndex: Int) {
+            hlsWrittenProgress = segmentIndex + 1
+        }
+    }
+
+    @Throws
+    suspend fun downloadThing(
         context: Context,
         link: IDownloadableMinimum,
         name: String,
@@ -696,250 +893,242 @@ object VideoDownloadManager {
         tryResume: Boolean,
         parentId: Int?,
         createNotificationCallback: (CreateNotificationMetadata) -> Unit,
-    ): Int {
+    ): Int = withContext(Dispatchers.IO) {
+        // we cant download torrents with this implementation, aria2c might be used in the future
         if (link.url.startsWith("magnet") || link.url.endsWith(".torrent")) {
-            return ERROR_UNKNOWN
+            return@withContext ERROR_UNKNOWN
         }
 
-        val basePath = context.getBasePath()
-
-        val displayName = getDisplayName(name, extension)
-        val relativePath =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && basePath.first.isDownloadDir()) getRelativePath(
-                folder
-            ) else folder
-
-        fun deleteFile(): Int {
-            return delete(context, name, relativePath, extension, parentId, basePath.first)
-        }
-
-        val stream = setupStream(context, name, relativePath, extension, tryResume)
-        if (stream.errorCode != SUCCESS_STREAM) return stream.errorCode
-
-        val resume = stream.resume!!
-        val fileStream = stream.fileStream!!
-        val fileLength = stream.fileLength!!
-
-        // CONNECT
-        val connection: URLConnection =
-            URL(link.url.replace(" ", "%20")).openConnection() // IDK OLD PHONES BE WACK
-
-        // SET CONNECTION SETTINGS
-        connection.connectTimeout = 10000
-        connection.setRequestProperty("Accept-Encoding", "identity")
-        connection.setRequestProperty("user-agent", USER_AGENT)
-        if (link.referer.isNotEmpty()) connection.setRequestProperty("referer", link.referer)
-
-        // extra stuff
-        connection.setRequestProperty(
-            "sec-ch-ua",
-            "\"Chromium\";v=\"91\", \" Not;A Brand\";v=\"99\""
+        var fileStream: OutputStream? = null
+        var requestStream: InputStream? = null
+        val metadata = DownloadMetaData(
+            totalBytes = 0,
+            bytesDownloaded = 0,
+            createNotificationCallback = createNotificationCallback,
+            id = parentId,
         )
+        try {
+            // get the file path
+            val (baseFile, basePath) = context.getBasePath()
+            val displayName = getDisplayName(name, extension)
+            val relativePath =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && baseFile.isDownloadDir()) getRelativePath(
+                    folder
+                ) else folder
 
-        connection.setRequestProperty("sec-ch-ua-mobile", "?0")
-        connection.setRequestProperty("accept", "*/*")
-        //   dataSource.setRequestProperty("Sec-Fetch-Site", "none") //same-site
-        connection.setRequestProperty("sec-fetch-user", "?1")
-        connection.setRequestProperty("sec-fetch-mode", "navigate")
-        connection.setRequestProperty("sec-fetch-dest", "video")
-        link.headers.entries.forEach {
-            connection.setRequestProperty(it.key, it.value)
-        }
+            // set up the download file
+            val stream = setupStream(context, name, relativePath, extension, tryResume)
+            if (stream.errorCode != SUCCESS_STREAM) return@withContext stream.errorCode
+            fileStream = stream.fileStream ?: return@withContext ERROR_UNKNOWN
+            val resume = stream.resume ?: return@withContext ERROR_UNKNOWN
+            val fileLength = stream.fileLength ?: return@withContext ERROR_UNKNOWN
+            val resumeAt = (if (resume) fileLength else 0)
+            metadata.bytesDownloaded = resumeAt
+            metadata.type = DownloadType.IsPending
 
-        if (resume)
-            connection.setRequestProperty("Range", "bytes=${fileLength}-")
-        val resumeLength = (if (resume) fileLength else 0)
+            // set up a connection
+            val request = app.get(
+                link.url.replace(" ", "%20"),
+                headers = link.headers.appendAndDontOverride(
+                    mapOf(
+                        "Accept-Encoding" to "identity",
+                        "accept" to "*/*",
+                        "user-agent" to USER_AGENT,
+                        "sec-ch-ua" to "\"Chromium\";v=\"91\", \" Not;A Brand\";v=\"99\"",
+                        "sec-fetch-mode" to "navigate",
+                        "sec-fetch-dest" to "video",
+                        "sec-fetch-user" to "?1",
+                        "sec-ch-ua-mobile" to "?0",
+                    ) + if (resumeAt > 0) mapOf("Range" to "bytes=${resumeAt}-") else emptyMap()
+                ),
+                referer = link.referer,
+                verify = false
+            )
 
-        // ON CONNECTION
-        connection.connect()
+            // init variables
+            val contentLength = request.size ?: 0
+            metadata.totalBytes = contentLength + resumeAt
 
-        val contentLength = try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) { // fuck android
-                connection.contentLengthLong
-            } else {
-                connection.getHeaderField("content-length").toLongOrNull()
-                    ?: connection.contentLength.toLong()
-            }
-        } catch (e: Exception) {
-            logError(e)
-            0L
-        }
-        val bytesTotal = contentLength + resumeLength
-
-        if (extension == "mp4" && bytesTotal < 5000000) return ERROR_TOO_SMALL_CONNECTION // DATA IS LESS THAN 5MB, SOMETHING IS WRONG
-
-        parentId?.let {
-            setKey(
-                KEY_DOWNLOAD_INFO,
-                it.toString(),
+            // save
+            metadata.setDownloadFileInfoTemplate(
                 DownloadedFileInfo(
-                    bytesTotal,
-                    relativePath ?: "",
-                    displayName,
-                    basePath = basePath.second
+                    totalBytes = metadata.approxTotalBytes,
+                    relativePath = relativePath ?: "",
+                    displayName = displayName,
+                    basePath = basePath
                 )
             )
-        }
 
-        // Could use connection.contentType for mime types when creating the file,
-        // however file is already created and players don't go of file type
+            // total length is less than 5mb, that is too short and something has gone wrong
+            if (extension == "mp4" && metadata.approxTotalBytes < 5000000) return@withContext ERROR_TOO_SMALL_CONNECTION
 
-        // https://stackoverflow.com/questions/23714383/what-are-all-the-possible-values-for-http-content-type-header
-        // might receive application/octet-stream
-        /*if (!connection.contentType.isNullOrEmpty() && !connection.contentType.startsWith("video")) {
-            return ERROR_WRONG_CONTENT // CONTENT IS NOT VIDEO, SHOULD NEVER HAPPENED, BUT JUST IN CASE
-        }*/
+            // read the buffer into the filestream, this is equivalent of transferTo
+            requestStream = request.body.byteStream()
+            metadata.type = DownloadType.IsDownloading
 
-        // READ DATA FROM CONNECTION
-        val connectionInputStream: InputStream = BufferedInputStream(connection.inputStream)
-        val buffer = ByteArray(1024)
-        var count: Int
-        var bytesDownloaded = resumeLength
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            var read: Int
+            while (requestStream.read(buffer, 0, DEFAULT_BUFFER_SIZE).also { read = it } >= 0) {
+                fileStream.write(buffer, 0, read)
 
-        var isPaused = false
-        var isStopped = false
-        var isDone = false
-        var isFailed = false
-
-        // TO NOT REUSE CODE
-        fun updateNotification() {
-            val type = when {
-                isDone -> DownloadType.IsDone
-                isStopped -> DownloadType.IsStopped
-                isFailed -> DownloadType.IsFailed
-                isPaused -> DownloadType.IsPaused
-                else -> DownloadType.IsDownloading
+                // wait until not paused
+                while (metadata.type == DownloadType.IsPaused) delay(100)
+                // if stopped then break to delete
+                if (metadata.type == DownloadType.IsStopped) break
+                metadata.addBytes(read.toLong())
             }
 
-            parentId?.let { id ->
-                try {
-                    downloadStatus[id] = type
-                    downloadStatusEvent.invoke(Pair(id, type))
-                    downloadProgressEvent.invoke(Triple(id, bytesDownloaded, bytesTotal))
-                } catch (e: Exception) {
-                    // IDK MIGHT ERROR
+            if (metadata.type == DownloadType.IsStopped) {
+                // we need to close before delete
+                fileStream.closeQuietly()
+                metadata.onDelete()
+                if (deleteFile(context, baseFile, relativePath ?: "", displayName)) {
+                    return@withContext SUCCESS_STOPPED
+                } else {
+                    return@withContext ERROR_DELETING_FILE
                 }
             }
 
-            createNotificationCallback.invoke(
-                CreateNotificationMetadata(
-                    type,
-                    bytesDownloaded,
-                    bytesTotal
+            metadata.type = DownloadType.IsDone
+            return@withContext SUCCESS_DOWNLOAD_DONE
+        } catch (e: IOException) {
+            // some sort of IO error, this should not happened
+            // we just rethrow it
+            logError(e)
+            throw e
+        } catch (t: Throwable) {
+            // some sort of network error, will error
+
+            // note that when failing we don't want to delete the file,
+            // only user interaction has that power
+            metadata.type = DownloadType.IsFailed
+            return@withContext ERROR_CONNECTION_ERROR
+        } finally {
+            fileStream?.closeQuietly()
+            requestStream?.closeQuietly()
+            metadata.close()
+        }
+    }
+
+    /** Helper function to make sure duplicate attributes don't get overriden or inserted without lowercase cmp
+     * example: map("a" to 1) appendAndDontOverride map("A" to 2, "a" to 3, "c" to 4) = map("a" to 1, "c" to 4)
+     * */
+    private fun <V> Map<String, V>.appendAndDontOverride(rhs: Map<String, V>): Map<String, V> {
+        val out = this.toMutableMap()
+        val current = this.keys.map { it.lowercase() }
+        for ((key, value) in rhs) {
+            if (current.contains(key.lowercase())) continue
+            out[key] = value
+        }
+        return out
+    }
+
+    @Throws
+    private suspend fun downloadHLS(
+        context: Context,
+        link: ExtractorLink,
+        name: String,
+        folder: String?,
+        parentId: Int?,
+        startIndex: Int?,
+        createNotificationCallback: (CreateNotificationMetadata) -> Unit,
+        parallelConnections: Int = 3
+    ): Int = withContext(Dispatchers.IO) {
+        require(parallelConnections >= 1)
+
+        val metadata = DownloadMetaData(
+            createNotificationCallback = createNotificationCallback,
+            id = parentId
+        )
+        val extension = "mp4"
+
+        var fileStream: OutputStream? = null
+        try {
+            // the start .ts index
+            var startAt = startIndex ?: 0
+
+            // set up the file data
+            val (baseFile, basePath) = context.getBasePath()
+            val relativePath =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && baseFile.isDownloadDir()) getRelativePath(
+                    folder
+                ) else folder
+            val displayName = getDisplayName(name, extension)
+            val stream = setupStream(context, name, relativePath, extension, startAt > 0)
+            if (stream.errorCode != SUCCESS_STREAM) return@withContext stream.errorCode
+            if (stream.resume != true) startAt = 0
+            fileStream = stream.fileStream ?: return@withContext ERROR_UNKNOWN
+
+            // push the metadata
+            metadata.bytesDownloaded = stream.fileLength ?: 0
+            metadata.hlsProgress = startAt
+            metadata.type = DownloadType.IsPending
+            metadata.setDownloadFileInfoTemplate(
+                DownloadedFileInfo(
+                    totalBytes = 0,
+                    relativePath = relativePath ?: "",
+                    displayName = displayName,
+                    basePath = basePath
                 )
             )
-            /*createNotification(
-                context,
-                source,
-                link.name,
-                ep,
-                type,
-                bytesDownloaded,
-                bytesTotal
-            )*/
-        }
 
-        val downloadEventListener = { event: Pair<Int, DownloadActionType> ->
-            if (event.first == parentId) {
-                when (event.second) {
-                    DownloadActionType.Pause -> {
-                        isPaused = true; updateNotification()
+            // do the initial get request to fetch the segments
+            val m3u8 = M3u8Helper.M3u8Stream(
+                link.url, link.quality, link.headers.appendAndDontOverride(
+                    mapOf(
+                        "Accept-Encoding" to "identity",
+                        "accept" to "*/*",
+                        "user-agent" to USER_AGENT,
+                    ) + if (link.referer.isNotBlank()) mapOf("referer" to link.referer) else emptyMap()
+                )
+            )
+            val items = M3u8Helper2.hslLazy(listOf(m3u8))
+
+            metadata.hlsTotal = items.size
+            metadata.type = DownloadType.IsDownloading
+
+            // does several connections in parallel instead of a regular for loop to improve
+            // download speed
+            (startAt until items.size).chunked(parallelConnections).forEach { subset ->
+                // wait until not paused
+                while (metadata.type == DownloadType.IsPaused) delay(100)
+                // if stopped then break to delete
+                if (metadata.type == DownloadType.IsStopped) return@forEach
+
+                subset.amap { idx ->
+                    idx to items.resolveLinkSafe(idx)?.also { bytes ->
+                        metadata.addSegment(bytes.size.toLong())
                     }
-                    DownloadActionType.Stop -> {
-                        isStopped = true; updateNotification()
-                        removeKey(KEY_RESUME_PACKAGES, event.first.toString())
-                        saveQueue()
+                }.forEach { (idx, bytes) ->
+                    if (bytes == null) {
+                        metadata.type = DownloadType.IsFailed
+                        return@withContext ERROR_CONNECTION_ERROR
                     }
-                    DownloadActionType.Resume -> {
-                        isPaused = false; updateNotification()
-                    }
+                    fileStream.write(bytes)
+                    metadata.setWrittenSegment(idx)
                 }
             }
-        }
 
-        if (parentId != null)
-            downloadEvent += downloadEventListener
-
-        // UPDATE DOWNLOAD NOTIFICATION
-        val notificationCoroutine = main {
-            while (true) {
-                if (!isPaused) {
-                    updateNotification()
-                }
-                for (i in 1..10) {
-                    delay(100)
+            if (metadata.type == DownloadType.IsStopped) {
+                // we need to close before delete
+                fileStream.closeQuietly()
+                metadata.onDelete()
+                if (deleteFile(context, baseFile, relativePath ?: "", displayName)) {
+                    return@withContext SUCCESS_STOPPED
+                } else {
+                    return@withContext ERROR_DELETING_FILE
                 }
             }
-        }
 
-        // THE REAL READ
-        try {
-            while (true) {
-                count = connectionInputStream.read(buffer)
-                if (count < 0) break
-                bytesDownloaded += count
-                // downloadProgressEvent.invoke(Pair(id, bytesDownloaded)) // Updates too much for any UI to keep up with
-                while (isPaused) {
-                    sleep(100)
-                    if (isStopped) {
-                        break
-                    }
-                }
-                if (isStopped) {
-                    break
-                }
-                fileStream.write(buffer, 0, count)
-            }
-        } catch (e: Exception) {
-            logError(e)
-            isFailed = true
-            updateNotification()
-        }
-
-        // REMOVE AND EXIT ALL
-        fileStream.close()
-        connectionInputStream.close()
-        notificationCoroutine.cancel()
-
-        try {
-            if (parentId != null)
-                downloadEvent -= downloadEventListener
-        } catch (e: Exception) {
-            logError(e)
-        }
-
-        try {
-            parentId?.let {
-                downloadStatus.remove(it)
-            }
-        } catch (e: Exception) {
-            // IDK MIGHT ERROR
-        }
-
-        // RETURN MESSAGE
-        return when {
-            isFailed -> {
-                parentId?.let { id -> downloadProgressEvent.invoke(Triple(id, 0, 0)) }
-                ERROR_CONNECTION_ERROR
-            }
-            isStopped -> {
-                parentId?.let { id -> downloadProgressEvent.invoke(Triple(id, 0, 0)) }
-                deleteFile()
-            }
-            else -> {
-                parentId?.let { id ->
-                    downloadProgressEvent.invoke(
-                        Triple(
-                            id,
-                            bytesDownloaded,
-                            bytesTotal
-                        )
-                    )
-                }
-                isDone = true
-                updateNotification()
-                SUCCESS_DOWNLOAD_DONE
-            }
+            metadata.type = DownloadType.IsDone
+            return@withContext SUCCESS_DOWNLOAD_DONE
+        } catch (t: Throwable) {
+            logError(t)
+            metadata.type = DownloadType.IsFailed
+            return@withContext ERROR_UNKNOWN
+        } finally {
+            fileStream?.closeQuietly()
+            metadata.close()
         }
     }
 
@@ -989,6 +1178,7 @@ object VideoDownloadManager {
                         found.delete()
                         this.createDirectory(directoryName)
                     }
+
                     this.isDirectory -> this.createDirectory(directoryName)
                     else -> this.parentFile?.createDirectory(directoryName)
                 }
@@ -1033,7 +1223,7 @@ object VideoDownloadManager {
         return (Environment.DIRECTORY_DOWNLOADS + '/' + folder + '/').replace(
             '/',
             File.separatorChar
-        )
+        ).replace("${File.separatorChar}${File.separatorChar}", File.separatorChar.toString())
     }
 
     /**
@@ -1063,7 +1253,7 @@ object VideoDownloadManager {
         return this != null && this.filePath == getDownloadDir()?.filePath
     }
 
-    private fun delete(
+    /*private fun delete(
         context: Context,
         name: String,
         folder: String?,
@@ -1074,7 +1264,7 @@ object VideoDownloadManager {
         val displayName = getDisplayName(name, extension)
 
         // delete all subtitle files
-        if (extension == "mp4") {
+        if (extension != "vtt" && extension != "srt") {
             try {
                 delete(context, name, folder, "vtt", parentId, basePath)
                 delete(context, name, folder, "srt", parentId, basePath)
@@ -1087,9 +1277,9 @@ object VideoDownloadManager {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && basePath.isDownloadDir()) {
             val relativePath = getRelativePath(folder)
             val lastContent =
-                context.contentResolver.getExistingDownloadUriOrNullQ(relativePath, displayName)
-            if (lastContent != null) {
-                context.contentResolver.delete(lastContent, null, null)
+                context.contentResolver.getExistingDownloadUriOrNullQ(relativePath, displayName) ?: return ERROR_DELETING_FILE
+            if(context.contentResolver.delete(lastContent, null, null) <= 0) {
+                return ERROR_DELETING_FILE
             }
         } else {
             val dir = basePath?.gotoDir(folder)
@@ -1099,253 +1289,13 @@ object VideoDownloadManager {
                 // Cleans up empty directory
                 if (dir.listFiles()?.isEmpty() == true) dir.delete()
             }
-//        }
             parentId?.let {
                 downloadDeleteEvent.invoke(parentId)
             }
         }
         return SUCCESS_STOPPED
-    }
+    }*/
 
-    private fun downloadHLS(
-        context: Context,
-        link: ExtractorLink,
-        name: String,
-        folder: String?,
-        parentId: Int?,
-        startIndex: Int?,
-        createNotificationCallback: (CreateNotificationMetadata) -> Unit
-    ): Int {
-        val extension = "mp4"
-        fun logcatPrint(vararg items: Any?) {
-            items.forEach {
-                println("[HLS]: $it")
-            }
-        }
-
-        val m3u8Helper = M3u8Helper()
-        logcatPrint("initialised the HLS downloader.")
-
-        val m3u8 = M3u8Helper.M3u8Stream(
-            link.url, link.quality, mapOf("referer" to link.referer)
-        )
-
-        var realIndex = startIndex ?: 0
-        val basePath = context.getBasePath()
-
-        val relativePath =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && basePath.first.isDownloadDir()) getRelativePath(
-                folder
-            ) else folder
-
-        val stream = setupStream(context, name, relativePath, extension, realIndex > 0)
-        if (stream.errorCode != SUCCESS_STREAM) return stream.errorCode
-
-        if (!stream.resume!!) realIndex = 0
-        val fileLengthAdd = stream.fileLength!!
-        val tsIterator = runBlocking {
-            m3u8Helper.hlsYield(listOf(m3u8), realIndex)
-        }
-
-        val displayName = getDisplayName(name, extension)
-
-        val fileStream = stream.fileStream!!
-
-        val firstTs = tsIterator.next()
-
-        var isDone = false
-        var isFailed = false
-        var isPaused = false
-        var bytesDownloaded = firstTs.bytes.size.toLong() + fileLengthAdd
-        var tsProgress = 1L + realIndex
-        val totalTs = firstTs.totalTs.toLong()
-
-        fun deleteFile(): Int {
-            return delete(context, name, relativePath, extension, parentId, basePath.first)
-        }
-        /*
-            Most of the auto generated m3u8 out there have TS of the same size.
-            And only the last TS might have a different size.
-
-            But oh well, in cases of handmade m3u8 streams this will go all over the place ¯\_(ツ)_/¯
-            So ya, this calculates an estimate of how many bytes the file is going to be.
-
-            > (bytesDownloaded/tsProgress)*totalTs
-         */
-
-        fun updateInfo() {
-            parentId?.let {
-                setKey(
-                    KEY_DOWNLOAD_INFO,
-                    it.toString(),
-                    DownloadedFileInfo(
-                        (bytesDownloaded * (totalTs / tsProgress.toFloat())).toLong(),
-                        relativePath ?: "",
-                        displayName,
-                        tsProgress.toString(),
-                        basePath = basePath.second
-                    )
-                )
-            }
-        }
-
-        updateInfo()
-
-        fun updateNotification() {
-            val type = when {
-                isDone -> DownloadType.IsDone
-                isFailed -> DownloadType.IsFailed
-                isPaused -> DownloadType.IsPaused
-                else -> DownloadType.IsDownloading
-            }
-
-            parentId?.let { id ->
-                try {
-                    downloadStatus[id] = type
-                    downloadStatusEvent.invoke(Pair(id, type))
-                    downloadProgressEvent.invoke(
-                        Triple(
-                            id,
-                            bytesDownloaded,
-                            (bytesDownloaded * (totalTs / tsProgress.toFloat())).toLong(),
-                        )
-                    )
-                } catch (e: Exception) {
-                    // IDK MIGHT ERROR
-                }
-            }
-
-            createNotificationCallback.invoke(
-                CreateNotificationMetadata(
-                    type,
-                    bytesDownloaded,
-                    (bytesDownloaded * (totalTs / tsProgress.toFloat())).toLong(),
-                    tsProgress,
-                    totalTs
-                )
-            )
-        }
-
-        fun stopIfError(ts: M3u8Helper.HlsDownloadData): Int? {
-            if (ts.errored || ts.bytes.isEmpty()) {
-                val error: Int = if (!ts.errored) {
-                    logcatPrint("Error: No stream was found.")
-                    ERROR_UNKNOWN
-                } else {
-                    logcatPrint("Error: Failed to fetch data.")
-                    ERROR_CONNECTION_ERROR
-                }
-                isFailed = true
-                fileStream.close()
-                deleteFile()
-                updateNotification()
-                return error
-            }
-            return null
-        }
-
-        val notificationCoroutine = main {
-            while (true) {
-                if (!isDone) {
-                    updateNotification()
-                }
-                for (i in 1..10) {
-                    delay(100)
-                }
-            }
-        }
-
-        val downloadEventListener = { event: Pair<Int, DownloadActionType> ->
-            if (event.first == parentId) {
-                when (event.second) {
-                    DownloadActionType.Stop -> {
-                        isFailed = true
-                    }
-                    DownloadActionType.Pause -> {
-                        isPaused =
-                            true  // Pausing is not supported since well...I need to know the index of the ts it was paused at
-                        // it may be possible to store it in a variable, but when the app restarts it will be lost
-                    }
-                    DownloadActionType.Resume -> {
-                        isPaused = false
-                    }
-                }
-                updateNotification()
-            }
-        }
-
-        fun closeAll() {
-            try {
-                if (parentId != null)
-                    downloadEvent -= downloadEventListener
-            } catch (e: Exception) {
-                logError(e)
-            }
-            try {
-                parentId?.let {
-                    downloadStatus.remove(it)
-                }
-            } catch (e: Exception) {
-                logError(e)
-                // IDK MIGHT ERROR
-            }
-            notificationCoroutine.cancel()
-        }
-
-        stopIfError(firstTs).let {
-            if (it != null) {
-                closeAll()
-                return it
-            }
-        }
-
-        if (parentId != null)
-            downloadEvent += downloadEventListener
-
-        fileStream.write(firstTs.bytes)
-
-        fun onFailed() {
-            fileStream.close()
-            deleteFile()
-            updateNotification()
-            closeAll()
-        }
-
-        for (ts in tsIterator) {
-            while (isPaused) {
-                if (isFailed) {
-                    onFailed()
-                    return SUCCESS_STOPPED
-                }
-                sleep(100)
-            }
-
-            if (isFailed) {
-                onFailed()
-                return SUCCESS_STOPPED
-            }
-
-            stopIfError(ts).let {
-                if (it != null) {
-                    closeAll()
-                    return it
-                }
-            }
-
-            fileStream.write(ts.bytes)
-            tsProgress = ts.currentIndex.toLong()
-            bytesDownloaded += ts.bytes.size.toLong()
-            logcatPrint("Download progress ${((tsProgress.toFloat() / totalTs.toFloat()) * 100).roundToInt()}%")
-            updateInfo()
-        }
-        isDone = true
-        fileStream.close()
-        updateNotification()
-
-        closeAll()
-        updateInfo()
-        return SUCCESS_DOWNLOAD_DONE
-    }
 
     fun getFileName(context: Context, metadata: DownloadEpisodeMetadata): String {
         return getFileName(context, metadata.name, metadata.episode, metadata.season)
@@ -1379,7 +1329,7 @@ object VideoDownloadManager {
         )
     }
 
-    private fun downloadSingleEpisode(
+    private suspend fun downloadSingleEpisode(
         context: Context,
         source: String?,
         folder: String?,
@@ -1405,25 +1355,37 @@ object VideoDownloadManager {
                     null
                 )?.extraInfo?.toIntOrNull()
             } else null
-            return downloadHLS(context, link, name, folder, ep.id, startIndex) { meta ->
-                main {
-                    createNotification(
-                        context,
-                        source,
-                        link.name,
-                        ep,
-                        meta.type,
-                        meta.bytesDownloaded,
-                        meta.bytesTotal,
-                        notificationCallback,
-                        meta.hlsProgress,
-                        meta.hlsTotal
-                    )
-                }
-            }.also { extractorJob.cancel() }
+            return suspendSafeApiCall {
+                downloadHLS(
+                    context,
+                    link,
+                    name,
+                    folder,
+                    ep.id,
+                    startIndex,
+                    createNotificationCallback = { meta ->
+                        main {
+                            createNotification(
+                                context,
+                                source,
+                                link.name,
+                                ep,
+                                meta.type,
+                                meta.bytesDownloaded,
+                                meta.bytesTotal,
+                                notificationCallback,
+                                meta.hlsProgress,
+                                meta.hlsTotal
+                            )
+                        }
+                    }
+                )
+            }.also {
+                extractorJob.cancel()
+            } ?: ERROR_UNKNOWN
         }
 
-        return normalSafeApiCall {
+        return suspendSafeApiCall {
             downloadThing(context, link, name, folder, "mp4", tryResume, ep.id) { meta ->
                 main {
                     createNotification(
@@ -1441,62 +1403,73 @@ object VideoDownloadManager {
         }.also { extractorJob.cancel() } ?: ERROR_UNKNOWN
     }
 
-    fun downloadCheck(
+    suspend fun downloadCheck(
         context: Context, notificationCallback: (Int, Notification) -> Unit,
-    ): Int? {
-        if (currentDownloads.size < maxConcurrentDownloads && downloadQueue.size > 0) {
-            val pkg = downloadQueue.removeFirst()
-            val item = pkg.item
-            val id = item.ep.id
-            if (currentDownloads.contains(id)) { // IF IT IS ALREADY DOWNLOADING, RESUME IT
-                downloadEvent.invoke(Pair(id, DownloadActionType.Resume))
-                /** ID needs to be returned to the work-manager to properly await notification */
-                return id
-            }
+    ) {
+        if (!(currentDownloads.size < maxConcurrentDownloads && downloadQueue.size > 0)) return
 
-            currentDownloads.add(id)
+        val pkg = downloadQueue.removeFirst()
+        val item = pkg.item
+        val id = item.ep.id
+        if (currentDownloads.contains(id)) { // IF IT IS ALREADY DOWNLOADING, RESUME IT
+            downloadEvent.invoke(Pair(id, DownloadActionType.Resume))
+            /** ID needs to be returned to the work-manager to properly await notification */
+            // return id
+        }
 
-            main {
-                try {
-                    for (index in (pkg.linkIndex ?: 0) until item.links.size) {
-                        val link = item.links[index]
-                        val resume = pkg.linkIndex == index
+        currentDownloads.add(id)
+        try {
+            for (index in (pkg.linkIndex ?: 0) until item.links.size) {
+                val link = item.links[index]
+                val resume = pkg.linkIndex == index
 
-                        setKey(
-                            KEY_RESUME_PACKAGES,
-                            id.toString(),
-                            DownloadResumePackage(item, index)
-                        )
-                        val connectionResult = withContext(Dispatchers.IO) {
-                            normalSafeApiCall {
-                                downloadSingleEpisode(
-                                    context,
-                                    item.source,
-                                    item.folder,
-                                    item.ep,
-                                    link,
-                                    notificationCallback,
-                                    resume
-                                ).also { println("Single episode finished with return code: $it") }
-                            }
-                        }
-                        if (connectionResult != null && connectionResult > 0) { // SUCCESS
-                            removeKey(KEY_RESUME_PACKAGES, id.toString())
-                            break
-                        } else if (index == item.links.lastIndex) {
-                            downloadStatusEvent.invoke(Pair(id, DownloadType.IsFailed))
-                        }
-                    }
-                } catch (e: Exception) {
-                    logError(e)
-                } finally {
-                    currentDownloads.remove(id)
-                    // Because otherwise notifications will not get caught by the workmanager
-                    downloadCheckUsingWorker(context)
+                setKey(
+                    KEY_RESUME_PACKAGES,
+                    id.toString(),
+                    DownloadResumePackage(item, index)
+                )
+
+                var connectionResult =
+                    downloadSingleEpisode(
+                        context,
+                        item.source,
+                        item.folder,
+                        item.ep,
+                        link,
+                        notificationCallback,
+                        resume
+                    )
+                //.also { println("Single episode finished with return code: $it") }
+
+                // retry every link at least once
+                if (connectionResult <= 0) {
+                    connectionResult = downloadSingleEpisode(
+                        context,
+                        item.source,
+                        item.folder,
+                        item.ep,
+                        link,
+                        notificationCallback,
+                        true
+                    )
+                }
+
+                if (connectionResult > 0) { // SUCCESS
+                    removeKey(KEY_RESUME_PACKAGES, id.toString())
+                    break
+                } else if (index == item.links.lastIndex) {
+                    downloadStatusEvent.invoke(Pair(id, DownloadType.IsFailed))
                 }
             }
+        } catch (e: Exception) {
+            logError(e)
+        } finally {
+            currentDownloads.remove(id)
+            // Because otherwise notifications will not get caught by the work manager
+            downloadCheckUsingWorker(context)
         }
-        return null
+
+        // return id
     }
 
     fun getDownloadFileInfoAndUpdateSettings(context: Context, id: Int): DownloadedFileInfoResult? {
@@ -1555,23 +1528,21 @@ object VideoDownloadManager {
         return success
     }
 
-    private fun deleteFile(context: Context, id: Int): Boolean {
-        val info =
-            context.getKey<DownloadedFileInfo>(KEY_DOWNLOAD_INFO, id.toString()) ?: return false
-        downloadEvent.invoke(Pair(id, DownloadActionType.Stop))
-        downloadProgressEvent.invoke(Triple(id, 0, 0))
-        downloadStatusEvent.invoke(Pair(id, DownloadType.IsStopped))
-        downloadDeleteEvent.invoke(id)
-        val base = basePathToFile(context, info.basePath)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && base.isDownloadDir()) {
+    private fun deleteFile(
+        context: Context,
+        folder: UniFile?,
+        relativePath: String,
+        displayName: String
+    ): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && folder.isDownloadDir()) {
             val cr = context.contentResolver ?: return false
             val fileUri =
-                cr.getExistingDownloadUriOrNullQ(info.relativePath, info.displayName)
+                cr.getExistingDownloadUriOrNullQ(relativePath, displayName)
                     ?: return true // FILE NOT FOUND, ALREADY DELETED
 
             return cr.delete(fileUri, null, null) > 0 // IF DELETED ROWS IS OVER 0
         } else {
-            val file = base?.gotoDir(info.relativePath)?.findFile(info.displayName)
+            val file = folder?.gotoDir(relativePath)?.findFile(displayName)
 //            val normalPath = context.getNormalPath(getFile(info.relativePath), info.displayName)
 //            val dFile = File(normalPath)
             if (file?.exists() != true) return true
@@ -1585,37 +1556,37 @@ object VideoDownloadManager {
         }
     }
 
+    private fun deleteFile(context: Context, id: Int): Boolean {
+        val info =
+            context.getKey<DownloadedFileInfo>(KEY_DOWNLOAD_INFO, id.toString()) ?: return false
+        downloadEvent.invoke(Pair(id, DownloadActionType.Stop))
+        downloadProgressEvent.invoke(Triple(id, 0, 0))
+        downloadStatusEvent.invoke(id to DownloadType.IsStopped)
+        downloadDeleteEvent.invoke(id)
+        val base = basePathToFile(context, info.basePath)
+        return deleteFile(context, base, info.relativePath, info.displayName)
+    }
+
     fun getDownloadResumePackage(context: Context, id: Int): DownloadResumePackage? {
         return context.getKey(KEY_RESUME_PACKAGES, id.toString())
     }
 
-    fun downloadFromResume(
+    suspend fun downloadFromResume(
         context: Context,
         pkg: DownloadResumePackage,
         notificationCallback: (Int, Notification) -> Unit,
         setKey: Boolean = true
     ) {
         if (!currentDownloads.any { it == pkg.item.ep.id }) {
-//            if (currentDownloads.size == maxConcurrentDownloads) {
-//                main {
-////                    showToast( // can be replaced with regular Toast
-////                        context,
-////                        "${pkg.item.ep.mainName}${pkg.item.ep.episode?.let { " ${context.getString(R.string.episode)} $it " } ?: " "}${
-////                            context.getString(
-////                                R.string.queued
-////                            )
-////                        }",
-////                        Toast.LENGTH_SHORT
-////                    )
-//                }
-//            }
             downloadQueue.addLast(pkg)
             downloadCheck(context, notificationCallback)
             if (setKey) saveQueue()
+            //ret
         } else {
-            downloadEvent.invoke(
+            downloadEvent(
                 Pair(pkg.item.ep.id, DownloadActionType.Resume)
             )
+            //null
         }
     }
 
@@ -1641,7 +1612,7 @@ object VideoDownloadManager {
         return false
     }*/
 
-    fun downloadEpisode(
+    suspend fun downloadEpisode(
         context: Context?,
         source: String?,
         folder: String?,
@@ -1650,13 +1621,12 @@ object VideoDownloadManager {
         notificationCallback: (Int, Notification) -> Unit,
     ) {
         if (context == null) return
-        if (links.isNotEmpty()) {
-            downloadFromResume(
-                context,
-                DownloadResumePackage(DownloadItem(source, folder, ep, links), null),
-                notificationCallback
-            )
-        }
+        if (links.isEmpty()) return
+        downloadFromResume(
+            context,
+            DownloadResumePackage(DownloadItem(source, folder, ep, links), null),
+            notificationCallback
+        )
     }
 
     /** Worker stuff */
