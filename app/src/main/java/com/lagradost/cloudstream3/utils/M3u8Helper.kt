@@ -2,6 +2,7 @@ package com.lagradost.cloudstream3.utils
 
 import com.lagradost.cloudstream3.ErrorLoadingException
 import com.lagradost.cloudstream3.app
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
@@ -88,21 +89,17 @@ object M3u8Helper2 {
         }
     }
 
-    private val defaultIvGen = sequence {
-        var initial = 1
+    private fun defaultIv(index: Int) : ByteArray {
+        return toBytes16Big(index+1)
+    }
 
-        while (true) {
-            yield(toBytes16Big(initial))
-            ++initial
-        }
-    }.iterator()
-
-    fun getDecrypter(
+    fun getDecrypted(
         secretKey: ByteArray,
         data: ByteArray,
-        iv: ByteArray = "".toByteArray()
+        iv: ByteArray = byteArrayOf(),
+        index : Int,
     ): ByteArray {
-        val ivKey = if (iv.isEmpty()) defaultIvGen.next() else iv
+        val ivKey = if (iv.isEmpty()) defaultIv(index) else iv
         val c = Cipher.getInstance("AES/CBC/PKCS5Padding")
         val skSpec = SecretKeySpec(secretKey, "AES")
         val ivSpec = IvParameterSpec(ivKey)
@@ -200,6 +197,8 @@ object M3u8Helper2 {
                     return if(condition()) out else null
                 } catch (e: IllegalArgumentException) {
                     return null
+                } catch (e : CancellationException) {
+                    return null
                 } catch (t: Throwable) {
                     delay(failDelay)
                 }
@@ -216,6 +215,8 @@ object M3u8Helper2 {
                 try {
                     return resolveLink(index)
                 } catch (e: IllegalArgumentException) {
+                    return null
+                } catch (e : CancellationException) {
                     return null
                 } catch (t: Throwable) {
                     delay(failDelay)
@@ -234,7 +235,7 @@ object M3u8Helper2 {
             if (tsData.isEmpty()) throw ErrorLoadingException("no data")
 
             return if (isEncrypted) {
-                getDecrypter(encryptionData, tsData, encryptionIv)
+                getDecrypted(encryptionData, tsData, encryptionIv, index)
             } else {
                 tsData
             }
@@ -272,13 +273,13 @@ object M3u8Helper2 {
             val match =
                 ENCRYPTION_URL_IV_REGEX.find(m3u8Response)!!.groupValues
 
-            var encryptionUri = match[1]
+            var encryptionUri = match[2]
 
             if (isNotCompleteUrl(encryptionUri)) {
                 encryptionUri = "${getParentLink(secondSelection.streamUrl)}/$encryptionUri"
             }
 
-            encryptionIv = match[2].toByteArray()
+            encryptionIv = match[3].toByteArray()
             val encryptionKeyResponse = app.get(encryptionUri, headers = headers, verify = false)
             encryptionData = encryptionKeyResponse.body.bytes()
         }

@@ -32,6 +32,13 @@ android {
         enable = true
     }
 
+    // disable this for now
+    //externalNativeBuild {
+    //    cmake {
+    //        path("CMakeLists.txt")
+    //    }
+    //}
+
     signingConfigs {
         create("prerelease") {
             if (prereleaseStoreFile != null) {
@@ -49,10 +56,10 @@ android {
     defaultConfig {
         applicationId = "com.lagradost.cloudstream3"
         minSdk = 21
-        targetSdk = 33
+        targetSdk = 29
 
         versionCode = 59
-        versionName = "4.1.5"
+        versionName = "4.1.8"
 
         resValue("string", "app_version", "${defaultConfig.versionName}${versionNameSuffix ?: ""}")
         resValue("string", "commit_hash", "git rev-parse --short HEAD".execute() ?: "")
@@ -226,7 +233,7 @@ dependencies {
     // To fix SSL fuckery on android 9
     implementation("org.conscrypt:conscrypt-android:2.2.1")
     // Util to skip the URI file fuckery 🙏
-    implementation("com.github.tachiyomiorg:unifile:17bec43")
+    implementation("com.github.LagradOst:SafeFile:0.0.2")
 
     // API because cba maintaining it myself
     implementation("com.uwetrottmann.tmdb2:tmdb-java:2.6.0")
