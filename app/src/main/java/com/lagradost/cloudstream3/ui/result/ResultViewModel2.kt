@@ -36,6 +36,7 @@ import com.lagradost.cloudstream3.ui.WatchType
 import com.lagradost.cloudstream3.ui.download.DOWNLOAD_NAVIGATE_TO
 import com.lagradost.cloudstream3.ui.player.GeneratorPlayer
 import com.lagradost.cloudstream3.ui.player.IGenerator
+import com.lagradost.cloudstream3.ui.player.LoadType
 import com.lagradost.cloudstream3.ui.player.RepoLinkGenerator
 import com.lagradost.cloudstream3.ui.player.SubtitleData
 import com.lagradost.cloudstream3.ui.result.EpisodeAdapter.Companion.getPlayerAction
@@ -517,7 +518,8 @@ class ResultViewModel2 : ViewModel() {
                         val episodeNumber = episodes[currentIndex].episode
                         if (episodeNumber < currentMin) {
                             currentMin = episodeNumber
-                        } else if (episodeNumber > currentMax) {
+                        }
+                        if (episodeNumber > currentMax) {
                             currentMax = episodeNumber
                         }
                         ++currentIndex
@@ -745,7 +747,7 @@ class ResultViewModel2 : ViewModel() {
                 val generator = RepoLinkGenerator(listOf(episode))
                 val currentLinks = mutableSetOf<ExtractorLink>()
                 val currentSubs = mutableSetOf<SubtitleData>()
-                generator.generateLinks(clearCache = false, isCasting = false, callback = {
+                generator.generateLinks(clearCache = false, LoadType.Chromecast, callback = {
                     it.first?.let { link ->
                         currentLinks.add(link)
                     }
@@ -825,7 +827,7 @@ class ResultViewModel2 : ViewModel() {
         isVisible: Boolean = true
     ) {
         if (activity == null) return
-        loadLinks(result, isVisible = isVisible, isCasting = true) { data ->
+        loadLinks(result, isVisible = isVisible, LoadType.Chromecast) { data ->
             startChromecast(activity, result, data.links, data.subs, 0)
         }
     }
@@ -936,7 +938,7 @@ class ResultViewModel2 : ViewModel() {
     private fun loadLinks(
         result: ResultEpisode,
         isVisible: Boolean,
-        isCasting: Boolean,
+        type: LoadType,
         clearCache: Boolean = false,
         work: suspend (CoroutineScope.(LinkLoadingResult) -> Unit)
     ) {
@@ -945,7 +947,7 @@ class ResultViewModel2 : ViewModel() {
             val links = loadLinks(
                 result,
                 isVisible = isVisible,
-                isCasting = isCasting,
+                type = type,
                 clearCache = clearCache
             )
             if (!this.isActive) return@ioSafe
@@ -956,11 +958,11 @@ class ResultViewModel2 : ViewModel() {
     private var currentLoadLinkJob: Job? = null
     private fun acquireSingleLink(
         result: ResultEpisode,
-        isCasting: Boolean,
+        type: LoadType,
         text: UiText,
         callback: (Pair<LinkLoadingResult, Int>) -> Unit,
     ) {
-        loadLinks(result, isVisible = true, isCasting = isCasting) { links ->
+        loadLinks(result, isVisible = true, type) { links ->
             postPopup(
                 text,
                 links.links.map { txt("${it.name} ${Qualities.getStringByInt(it.quality)}") }) {
@@ -971,11 +973,10 @@ class ResultViewModel2 : ViewModel() {
 
     private fun acquireSingleSubtitle(
         result: ResultEpisode,
-        isCasting: Boolean,
         text: UiText,
         callback: (Pair<LinkLoadingResult, Int>) -> Unit,
     ) {
-        loadLinks(result, isVisible = true, isCasting = isCasting) { links ->
+        loadLinks(result, isVisible = true, type = LoadType.Unknown) { links ->
             postPopup(
                 text,
                 links.subs.map { txt(it.name) })
@@ -988,7 +989,7 @@ class ResultViewModel2 : ViewModel() {
     private suspend fun CoroutineScope.loadLinks(
         result: ResultEpisode,
         isVisible: Boolean,
-        isCasting: Boolean,
+        type: LoadType,
         clearCache: Boolean = false,
     ): LinkLoadingResult {
         val tempGenerator = RepoLinkGenerator(listOf(result))
@@ -1002,7 +1003,7 @@ class ResultViewModel2 : ViewModel() {
         }
         try {
             updatePage()
-            tempGenerator.generateLinks(clearCache, isCasting, { (link, _) ->
+            tempGenerator.generateLinks(clearCache, type, { (link, _) ->
                 if (link != null) {
                     links += link
                     updatePage()
@@ -1272,7 +1273,6 @@ class ResultViewModel2 : ViewModel() {
 
                 acquireSingleSubtitle(
                     click.data,
-                    false,
                     txt(R.string.episode_action_download_subtitle)
                 ) { (links, index) ->
                     downloadSubtitle(
@@ -1317,7 +1317,7 @@ class ResultViewModel2 : ViewModel() {
                 val response = currentResponse ?: return
                 acquireSingleLink(
                     click.data,
-                    false,
+                    LoadType.InAppDownload,
                     txt(R.string.episode_action_download_mirror)
                 ) { (result, index) ->
                     ioSafe {
@@ -1347,7 +1347,7 @@ class ResultViewModel2 : ViewModel() {
                     loadLinks(
                         click.data,
                         isVisible = false,
-                        isCasting = false,
+                        type = LoadType.InApp,
                         clearCache = true
                     )
                 }
@@ -1356,7 +1356,7 @@ class ResultViewModel2 : ViewModel() {
             ACTION_CHROME_CAST_MIRROR -> {
                 acquireSingleLink(
                     click.data,
-                    isCasting = true,
+                    LoadType.Chromecast,
                     txt(R.string.episode_action_chromecast_mirror)
                 ) { (result, index) ->
                     startChromecast(activity, click.data, result.links, result.subs, index)
@@ -1365,7 +1365,7 @@ class ResultViewModel2 : ViewModel() {
 
             ACTION_PLAY_EPISODE_IN_BROWSER -> acquireSingleLink(
                 click.data,
-                isCasting = true,
+                LoadType.Browser,
                 txt(R.string.episode_action_play_in_browser)
             ) { (result, index) ->
                 try {
@@ -1380,7 +1380,7 @@ class ResultViewModel2 : ViewModel() {
             ACTION_COPY_LINK -> {
                 acquireSingleLink(
                     click.data,
-                    isCasting = true,
+                    LoadType.ExternalApp,
                     txt(R.string.episode_action_copy_link)
                 ) { (result, index) ->
                     val act = activity ?: return@acquireSingleLink
@@ -1399,7 +1399,7 @@ class ResultViewModel2 : ViewModel() {
             }
 
             ACTION_PLAY_EPISODE_IN_VLC_PLAYER -> {
-                loadLinks(click.data, isVisible = true, isCasting = true) { links ->
+                loadLinks(click.data, isVisible = true, LoadType.ExternalApp) { links ->
                     if (links.links.isEmpty()) {
                         showToast(R.string.no_links_found_toast, Toast.LENGTH_SHORT)
                         return@loadLinks
@@ -1415,7 +1415,7 @@ class ResultViewModel2 : ViewModel() {
 
             ACTION_PLAY_EPISODE_IN_WEB_VIDEO -> acquireSingleLink(
                 click.data,
-                isCasting = true,
+                LoadType.Chromecast,
                 txt(
                     R.string.episode_action_play_in_format,
                     txt(R.string.player_settings_play_in_web)
@@ -1432,7 +1432,7 @@ class ResultViewModel2 : ViewModel() {
 
             ACTION_PLAY_EPISODE_IN_MPV -> acquireSingleLink(
                 click.data,
-                isCasting = true,
+                LoadType.Chromecast,
                 txt(
                     R.string.episode_action_play_in_format,
                     txt(R.string.player_settings_play_in_mpv)
@@ -1461,7 +1461,6 @@ class ResultViewModel2 : ViewModel() {
                                     if (index >= 0)
                                         it.goto(index)
                                 }
-
                         } ?: return, list
                     )
                 )
@@ -1540,7 +1539,11 @@ class ResultViewModel2 : ViewModel() {
                             this.name,
                             this.japName
                         ).filter { it.length > 2 }
-                            .distinct(), // the reason why we filter is due to not wanting smth like " " or "?"
+                            .distinct().map {
+                            // this actually would be nice if we improved a bit as 3rd season == season 3 == III ect
+                                // right now it just removes the dubbed status
+                                it.lowercase().replace(Regex("""\(?[ds]ub(bed)?\)?(\s|$)""") , "").trim()
+                                            },
                         TrackerType.getTypes(this.type),
                         this.year
                     )
@@ -2173,7 +2176,7 @@ class ResultViewModel2 : ViewModel() {
                                     trailerData.extractorUrl,
                                     trailerData.referer ?: "",
                                     Qualities.Unknown.value,
-                                    trailerData.extractorUrl.contains(".m3u8")
+                                    type = INFER_TYPE
                                 )
                             ) to arrayListOf()
                         } else {
